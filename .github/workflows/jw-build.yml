@@ -1,4 +1,4 @@
-name: JW Branded RustDesk (sciter x86)
+name: JW Branded RustDesk (sciter x64)
 
 on:
   workflow_dispatch:
@@ -7,15 +7,11 @@ permissions:
   contents: read
 
 env:
-  LLVM_VERSION: "15.0.6"
   VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  RENDEZVOUS_SERVER: "108.61.126.191"
-  RS_PUB_KEY: "U1zWuXjEvB611RacTE1X+v9ovultm3ttIgUgLeIMtLM="
-  APP_NAME: "중원컨설팅 원격지원"
 
 jobs:
-  build-sciter-x86:
+  build-sciter-x64:
     runs-on: windows-2022
     steps:
       - name: Export GH Actions cache env
@@ -40,21 +36,22 @@ jobs:
           echo "----- verify -----"
           grep -nE 'RENDEZVOUS_SERVERS: &|RS_PUB_KEY: &str|APP_NAME: RwLock' "$cfg"
 
-      - name: Install LLVM and Clang (32bit)
-        uses: rustdesk-org/install-llvm-action-32bit@6aa7d9ad3df84dff01cd4596dd0fc880a7f47fce
-        with:
-          version: "15.0.6"
+      - name: Install LLVM/Clang (x64) + set LIBCLANG_PATH
+        shell: pwsh
+        run: |
+          choco install -y llvm --version=15.0.2 --allow-downgrade --no-progress
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Install Rust toolchain (nightly for sciter)
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+      - name: Install Rust toolchain (1.75 for sciter)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly-2023-10-13
-          targets: i686-pc-windows-msvc
+          toolchain: "1.75"
+          targets: x86_64-pc-windows-msvc
           components: "rustfmt"
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: windows-2022-sciter
+          prefix-key: windows-2022-sciter-x64
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
@@ -63,39 +60,37 @@ jobs:
           vcpkgGitCommitId: "120deac3062162151622ca4860575a33844ba10b"
           doNotCache: false
 
-      - name: Install vcpkg dependencies
+      - name: Install vcpkg dependencies (x64-windows-static)
         env:
-          VCPKG_DEFAULT_HOST_TRIPLET: x86-windows-static
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
         shell: bash
         run: |
-          "$VCPKG_ROOT/vcpkg" install --triplet x86-windows-static --x-install-root="$VCPKG_ROOT/installed"
+          "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"
 
-      - name: Build rustdesk (sciter x86)
+      - name: Build rustdesk (sciter x64, inline only)
         shell: bash
         run: |
           python3 res/inline-sciter.py
-          sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
-          cargo update -p sciter-rs --precise 674e07d3066ca9a92ced3816203ab6b652629d1e
-          cargo build --locked --features inline --release --bins
+          cargo build --features inline --release --bins
           mkdir -p ./Release
           mv ./target/release/rustdesk.exe ./Release/rustdesk.exe
-          curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
+          curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x64/sciter.dll
 
       - name: Build self-extracted single exe
         shell: bash
         run: |
-          sed -i '/dpiAware/d' res/manifest.xml
+          sed -i '/dpiAware/d' res/manifest.xml || true
           pushd ./libs/portable
           pip3 install -r requirements.txt
           python3 ./generate.py -f ../../Release/ -o . -e ../../Release/rustdesk.exe
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/JungwonRemoteSupport-1.4.7.exe"
+          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/JungwonRemoteSupport-x64.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: jw-remote-support-win-x86
+          name: jw-remote-support-win-x64
           path: |
             ./SignOutput/*.exe
             ./Release/rustdesk.exe

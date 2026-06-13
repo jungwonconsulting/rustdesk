@@ -1,0 +1,102 @@
+name: JW Branded RustDesk (sciter x86)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_VERSION: "15.0.6"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  RENDEZVOUS_SERVER: "108.61.126.191"
+  RS_PUB_KEY: "U1zWuXjEvB611RacTE1X+v9ovultm3ttIgUgLeIMtLM="
+  APP_NAME: "중원컨설팅 원격지원"
+
+jobs:
+  build-sciter-x86:
+    runs-on: windows-2022
+    steps:
+      - name: Export GH Actions cache env
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout (submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Inject server config + app name (branding)
+        shell: bash
+        run: |
+          cfg=libs/hbb_common/src/config.rs
+          sed -i 's#pub const RENDEZVOUS_SERVERS: &\[&str\] = &\["[^"]*"\];#pub const RENDEZVOUS_SERVERS: \&[\&str] = \&["108.61.126.191"];#' "$cfg"
+          sed -i 's#pub const RS_PUB_KEY: &str = "[^"]*";#pub const RS_PUB_KEY: \&str = "U1zWuXjEvB611RacTE1X+v9ovultm3ttIgUgLeIMtLM=";#' "$cfg"
+          sed -i 's#RwLock::new("RustDesk".to_owned())#RwLock::new("중원컨설팅 원격지원".to_owned())#' "$cfg"
+          echo "----- verify -----"
+          grep -nE 'RENDEZVOUS_SERVERS: &|RS_PUB_KEY: &str|APP_NAME: RwLock' "$cfg"
+
+      - name: Install LLVM and Clang (32bit)
+        uses: rustdesk-org/install-llvm-action-32bit@6aa7d9ad3df84dff01cd4596dd0fc880a7f47fce
+        with:
+          version: "15.0.6"
+
+      - name: Install Rust toolchain (nightly for sciter)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: nightly-2023-10-13
+          targets: i686-pc-windows-msvc
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: windows-2022-sciter
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: "120deac3062162151622ca4860575a33844ba10b"
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x86-windows-static
+        shell: bash
+        run: |
+          "$VCPKG_ROOT/vcpkg" install --triplet x86-windows-static --x-install-root="$VCPKG_ROOT/installed"
+
+      - name: Build rustdesk (sciter x86)
+        shell: bash
+        run: |
+          python3 res/inline-sciter.py
+          sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
+          cargo update -p sciter-rs --precise 674e07d3066ca9a92ced3816203ab6b652629d1e
+          cargo build --locked --features inline,vram,hwcodec --release --bins
+          mkdir -p ./Release
+          mv ./target/release/rustdesk.exe ./Release/rustdesk.exe
+          curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
+
+      - name: Build self-extracted single exe
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/rustdesk.exe
+          popd
+          mkdir -p ./SignOutput
+          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/JungwonRemoteSupport-1.4.7.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-remote-support-win-x86
+          path: |
+            ./SignOutput/*.exe
+            ./Release/rustdesk.exe
+            ./Release/sciter.dll

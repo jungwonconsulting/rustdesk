@@ -33,8 +33,13 @@ jobs:
           sed -i 's#pub const RENDEZVOUS_SERVERS: &\[&str\] = &\["[^"]*"\];#pub const RENDEZVOUS_SERVERS: \&[\&str] = \&["108.61.126.191"];#' "$cfg"
           sed -i 's#pub const RS_PUB_KEY: &str = "[^"]*";#pub const RS_PUB_KEY: \&str = "U1zWuXjEvB611RacTE1X+v9ovultm3ttIgUgLeIMtLM=";#' "$cfg"
           sed -i 's#RwLock::new("RustDesk".to_owned())#RwLock::new("중원컨설팅 원격지원".to_owned())#' "$cfg"
-          echo "----- verify -----"
+          echo "----- verify config.rs -----"
           grep -nE 'RENDEZVOUS_SERVERS: &|RS_PUB_KEY: &str|APP_NAME: RwLock' "$cfg"
+          # remove "Powered by RustDesk" link (force the condition false)
+          ui=src/ui/index.tis
+          sed -i 's/get_builtin_option("hide-powered-by-me") != "Y"/get_builtin_option("hide-powered-by-me") == "Y"/' "$ui"
+          echo "----- verify powered-by removed -----"
+          grep -n 'powered-by\|powered_by_me' "$ui" | head
 
       - name: Install LLVM/Clang (x64) + set LIBCLANG_PATH
         shell: pwsh
